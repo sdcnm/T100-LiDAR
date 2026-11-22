@@ -1,73 +1,73 @@
-# T100激光雷达解锁点云限制
+# Unlocking Point Cloud Restrictions on the T100 LiDAR
 
-[English](README.en.md)
+[简体中文](README.zh-CN.md)
 
-本文汇总雷达的网口接入、采样启停、点云与 IMU 解码、配置读写和扫描角度设置，并列出进入固件升级模式的命令。涉及的控制接口采用 `0x55` 帧头，设备控制端口为 UDP `60000`。具体行为取决于设备固件和运行配置，接入时需要同时核对命令应答、参数回读和实际数据流。
+This document covers Ethernet access, sampling control, point cloud and IMU decoding, configuration access, and scan angle settings. It also lists the command for entering firmware update mode. The control interface uses a `0x55` frame header and UDP port `60000` on the device. Behavior depends on the firmware and runtime configuration. During integration, check command responses, configuration readback, and the actual data streams together.
 
-## 1 接线与数据接收
+## 1 Connections and Data Reception
 
-可通过电脑或运行 Linux 的开发板连接雷达网口。为接收端配置能够直达雷达的 IPv4 地址，并放行对应 UDP 端口。
+Use a computer or a Linux development board to connect to the LiDAR over Ethernet. Assign the receiving device an IPv4 address that can reach the LiDAR, and allow the required UDP traffic.
 
-| 通道 | 方向 | 设备侧端口 | 接收端说明 |
+| Channel | Direction | Device Port | Receiving Endpoint |
 |---|---|---|---|
-| 设备发现 | 设备 → 广播 | 60010 | 监听 `50000` |
-| 控制请求与应答 | 双向 | 60000 | 同一 socket 发送请求、接收应答 |
-| 状态推送 | 设备 → 客户端 | 60000 | 核对实际目的地址，也可能到达控制 socket 的源端口 |
-| 点云 | 设备 → 客户端 | 60001 | 接收端口可先参考 `60001`，以实际目的地址为准 |
-| IMU | 设备 → 客户端 | 60003 | 接收端口可先参考 `60003`，以实际目的地址为准 |
+| Device discovery | Device → Broadcast | 60010 | Listen on `50000` |
+| Control requests and responses | Bidirectional | 60000 | Send requests and receive responses through the same socket |
+| Status push | Device → Client | 60000 | Check the actual destination. Messages may arrive at the control socket's source port |
+| Point cloud | Device → Client | 60001 | Start by checking destination port `60001`, then confirm the actual destination |
+| IMU | Device → Client | 60003 | Start by checking destination port `60003`, then confirm the actual destination |
 
-设备发现广播发往 `255.255.255.255:50000`，命令为 `32/21`。收到后，从 UDP 源 IPv4 查找雷达，再向该地址的控制端口发送查询。
+Discovery messages use command `32/21` and are broadcast to `255.255.255.255:50000`. Obtain the LiDAR's IPv4 address from the UDP source address, then send a query to its control port.
 
-配置表中的目的地址可能与当前推送路径不同。例如配置端口可能读到 `56201/56301/56401`，点云和 IMU 却推送到 `60001/60003`。排查收包问题时，同时检查接收端地址、实际目的端口、入站规则和应用 socket。
+The destination stored in the configuration may differ from the current streaming destination. For example, the configured ports may read back as `56201/56301/56401`, while point cloud and IMU traffic goes to `60001/60003`. When troubleshooting reception, check the receiving address, actual destination port, inbound traffic rules, and application socket.
 
-参考接入顺序如下。
+A reference connection sequence follows.
 
-1. 接收发现广播，确定设备地址，建立控制 socket。
-2. 读回并保存网络和 ROI 原值，准备点云和 IMU 的接收 socket。
-3. 如需更改推送地址，按第 6 节写入 IPv4 和端口，回读并检查实际收包。
-4. 按第 2 节发送启动命令，分别查看目标状态、实际状态和两路数据。
-5. 接收端按第 3 节检查数据类型、长度和校验字段。
+1. Receive a discovery broadcast, identify the device address, and open a control socket.
+2. Read and save the existing network and ROI settings, then prepare receiving sockets for point cloud and IMU data.
+3. If the streaming destination needs to change, write the IPv4 address and port as described in Section 6. Read them back and check reception.
+4. Send the startup commands in Section 2. Check the target state, actual state, and both data streams separately.
+5. Check the data type, packet length, and checksum fields as described in Section 3.
 
-## 2 启动、停止与工作状态
+## 2 Starting and Stopping Sampling
 
-### 启动采样
+### Start Sampling
 
-启动参考流程由两条写命令和一条查询组成。
+The reference startup sequence uses two write commands followed by a query.
 
-| 顺序 | 指令 | 请求内容 | 用途 |
+| Step | Command | Request Contents | Purpose |
 |---|---|---|---|
-| 1 | `32/50` | `count=1, key=3, length=1, value=1` | 将目标状态设为采样 |
-| 2 | `32/14` | `enable=1` | 打开采样使能 |
-| 3 | `32/51` | `count=1, key=3` | 读回目标状态 |
+| 1 | `32/50` | `count=1, key=3, length=1, value=1` | Set the target state to sampling |
+| 2 | `32/14` | `enable=1` | Enable sampling |
+| 3 | `32/51` | `count=1, key=3` | Read back the target state |
 
-接收状态推送 `01/02`，查看其中的 `0x8006` 是否报告采样状态，再检查点云和 IMU 是否到达。目标状态、实际状态和数据流分别记录。
+Receive status messages `01/02` and check whether key `0x8006` reports the sampling state. Then check whether point cloud and IMU packets arrive. Record the target state, actual state, and data streams separately.
 
-下面给出完整的启动报文。`TX` 表示客户端发送，`RX` 表示设备应答，竖线用于辅助阅读。示例已包含帧长和 CRC，更换序号、端点或载荷后需重新计算 CRC。
+The complete startup frames are shown below. `TX` denotes a request sent by the client, and `RX` denotes the device response. Vertical bars are included for readability. The examples include frame lengths and CRCs. Recalculate the CRCs whenever the sequence number, endpoints, or payload changes.
 
-第一步，设置采样目标。
+First, set the target state to sampling.
 
 ```text
 TX  55 16 04 FC | 28 AD | 20 01 | 40 | 32 50 | 01 00 03 00 00 00 01 00 01 | 54 A3
 RX  55 12 04 C7 | AD 28 | 20 01 | 80 | 32 50 | 00 00 00 00 00 | 98 F1
 ```
 
-第二步，打开采样使能。
+Next, enable sampling.
 
 ```text
 TX  55 0E 04 66 | 28 AD | 21 01 | 40 | 32 14 | 01 | CF 4D
 RX  55 0E 04 66 | AD 28 | 21 01 | 80 | 32 14 | 00 | A2 4D
 ```
 
-第三步，查询目标状态。示例应答最后一字节为 `01`。
+Finally, query the target state. The last byte of the example response is `01`.
 
 ```text
 TX  55 13 04 03 | 28 AD | 22 01 | 40 | 32 51 | 01 00 03 00 00 00 | D5 6C
 RX  55 1B 04 75 | AD 28 | 22 01 | 80 | 32 51 | 00 00 00 00 00 01 00 03 00 00 00 01 00 01 | 06 D9
 ```
 
-### 关闭使能与切换待机
+### Disable Sampling and Select Standby
 
-先发送 `32/14` 的 `enable=0`，再通过 `32/50` 把目标状态设为 `2`，然后查询目标和实际状态。
+Send `32/14` with `enable=0`, then use `32/50` to set the target state to `2`. Query the target and actual states afterward.
 
 ```text
 TX  55 0E 04 66 | 28 AD | 24 01 | 40 | 32 14 | 00 | C1 48
@@ -79,127 +79,127 @@ TX  55 16 04 FC | 28 AD | 25 01 | 40 | 32 50 | 01 00 03 00 00 00 01 00 02 | 9C 1
 RX  55 12 04 C7 | AD 28 | 25 01 | 80 | 32 50 | 00 00 00 00 00 | 23 6D
 ```
 
-待机状态下仍可能有数据推送。是否停止点云、IMU 或电机运行，需要分别观察，不能仅凭目标状态或一条 ACK 判断。
+Data may still stream in standby. Check point cloud output, IMU output, and motor operation separately. The target state or a single ACK alone is insufficient to determine whether these have stopped.
 
-### 三条状态控制指令的字段
+### State Control Fields
 
-以下偏移从命令载荷起点计算，多字节字段按小端编码。
+The offsets below are relative to the start of the command payload. Multibyte fields use little-endian encoding.
 
-| 请求字段 | `32/50` 设置目标 | `32/51` 读取目标 |
+| Request Field | `32/50` Set Target | `32/51` Read Target |
 |---|---|---|
-| count | 偏移 0，u16，填 1 | 偏移 0，u16，填 1 |
-| key | 偏移 2，u32，填 3 | 偏移 2，u32，填 3 |
-| length | 偏移 6，u16，填 1 | — |
-| value | 偏移 8，u8，1 采样、2 待机 | — |
+| count | Offset 0, u16, set to 1 | Offset 0, u16, set to 1 |
+| key | Offset 2, u32, set to 3 | Offset 2, u32, set to 3 |
+| length | Offset 6, u16, set to 1 | — |
+| value | Offset 8, u8, 1 for sampling and 2 for standby | — |
 
-`32/50` 成功应答为 `ret_code u8=0, error_key u32=0`。`32/14` 请求只含一个字节，`01` 开启、`00` 关闭，成功应答为 `00`。
+A successful `32/50` response contains `ret_code u8=0, error_key u32=0`. A `32/14` request contains one byte, `01` to enable or `00` to disable. Its successful response is `00`.
 
-`32/51` 成功应答长 14 字节，布局如下。
+A successful `32/51` response has a 14-byte payload with the following layout.
 
-| 字段 | 偏移 | 类型 | 含义 |
+| Field | Offset | Type | Meaning |
 |---|---|---|---|
-| ret_code | 0 | u8 | 成功为 0 |
-| error_key | 1 | u32 | 成功为 0 |
-| item_count | 5 | u16 | 单项查询为 1 |
-| key | 7 | u32 | 回显 3 |
-| length | 11 | u16 | 状态长度为 1 |
-| value | 13 | u8 | 目标状态 |
+| ret_code | 0 | u8 | 0 on success |
+| error_key | 1 | u32 | 0 on success |
+| item_count | 5 | u16 | 1 for a single-item query |
+| key | 7 | u32 | Echoes 3 |
+| length | 11 | u16 | State value length, 1 byte |
+| value | 13 | u8 | Target state |
 
-状态推送键 `0x8006` 的参考取值如下。
+Reference values for status push key `0x8006` are listed below.
 
-| 值 | 工作状态 |
+| Value | Operating State |
 |---|---|
-| `0x01` | 采样 |
-| `0x02` | 待机 |
-| `0x04` | 故障 |
-| `0x05` | 自检 |
-| `0x06` | 电机启动 |
-| `0x09` | 就绪 |
+| `0x01` | Sampling |
+| `0x02` | Standby |
+| `0x04` | Error |
+| `0x05` | Self-check |
+| `0x06` | Motor startup |
+| `0x09` | Ready |
 
-## 3 点云和 IMU 的包结构
+## 3 Point Cloud and IMU Packets
 
-### 公共数据头
+### Common Header
 
-偏移从 UDP 数据段首字节起算。以下格式的头部为 36 字节，整数和浮点数据都采用小端。
+Offsets are measured from the first byte of the UDP payload. The format below uses a 36-byte header. Integer and floating-point fields are little-endian.
 
-| 字段 | 偏移 | 字节数 | 解释 |
+| Field | Offset | Bytes | Description |
 |---|---|---|---|
-| version | 0 | 1 | 本文数据格式的包版本值为 `0x01` |
-| length | 1 | 2 | 整个 UDP 数据段的长度 |
-| time_interval | 3 | 2 | 包内点云采样时间字段，单位 0.1 µs |
-| dot_num | 5 | 2 | 本文点云格式为 96，IMU 为 1 |
-| udp_cnt | 7 | 2 | 数据流包序号，分别跟踪并处理回绕 |
-| frame_cnt | 9 | 1 | 帧计数，非重复扫描时忽略 |
-| data_type | 10 | 1 | 0 为 IMU，1 为直角坐标点云 |
-| time_type | 11 | 1 | 0 为启动时间基准，1 为 PTP，2 为 GPS |
-| reserved | 12 | 12 | 保留字段，接收时忽略，可为非零 |
-| crc32 | 24 | 4 | 点云字段可能为零。IMU 校验从偏移 28 至包尾 |
-| timestamp | 28 | 8 | u64 时间戳，单位 ns |
-| data | 36 | 变长 | 按 data_type 选择解码方式 |
+| version | 0 | 1 | Packet version `0x01` for the data format described here |
+| length | 1 | 2 | Total UDP payload length |
+| time_interval | 3 | 2 | Intra-packet point cloud sampling time field, in units of 0.1 µs |
+| dot_num | 5 | 2 | 96 for the point cloud format described here, 1 for IMU |
+| udp_cnt | 7 | 2 | Packet sequence number. Track each stream separately and handle wraparound |
+| frame_cnt | 9 | 1 | Frame counter. Ignore for non-repetitive scanning |
+| data_type | 10 | 1 | 0 for IMU, 1 for Cartesian point cloud |
+| time_type | 11 | 1 | 0 for time since startup, 1 for PTP, 2 for GPS |
+| reserved | 12 | 12 | Reserved. Ignore on reception. These bytes may be nonzero |
+| crc32 | 24 | 4 | May be zero in point cloud packets. For IMU, check from offset 28 to the packet end |
+| timestamp | 28 | 8 | u64 timestamp in ns |
+| data | 36 | Variable | Decode according to data_type |
 
-`time_type=0` 时在同一次启动内比较时间，复位后重新建立序号和时间基线。跨设备或绝对时间比较前，核对同步源和时间原点。
+When `time_type=0`, compare timestamps within the same boot session. Establish new sequence and time baselines after a reset. Check the synchronization source and time origin before comparing absolute time or timestamps from different devices.
 
-### 直角坐标点云
+### Cartesian Point Cloud
 
-`data_type=1` 的参考包长为 1380 字节，载荷含 96 条记录。每条记录长 14 字节，下表偏移相对该记录起点。
+The reference packet length for `data_type=1` is 1380 bytes, containing 96 point records. Each record is 14 bytes. Offsets in the table below are relative to the start of that record.
 
-| 字段 | 偏移 | 类型 | 单位或含义 |
+| Field | Offset | Type | Unit or Meaning |
 |---|---|---|---|
 | x | 0 | int32 | mm |
 | y | 4 | int32 | mm |
 | z | 8 | int32 | mm |
-| reflectivity | 12 | uint8 | 反射率原始值 |
-| tag | 13 | uint8 | 点属性标签 |
+| reflectivity | 12 | uint8 | Raw reflectivity value |
+| tag | 13 | uint8 | Point attribute tag |
 
-Python 可用 `<iiiBB` 解码单点。绘图前将 XYZ 除以 1000，即可换成米。
+In Python, use `<iiiBB` to decode a point. Divide XYZ by 1000 to convert coordinates to meters before plotting.
 
-过滤时结合坐标和业务距离范围。数据中可能有 `x=y=z=0` 的占位点，也可能有模长约 200 m 的无回波哨兵。占位点可带反射率 60，哨兵也可能有非零反射率或多种标签，单独按反射率或固定 tag 过滤可能遗漏。
+Filter using the coordinates and the distance range required by the application. Packets may contain `x=y=z=0` placeholders and no-return sentinel points with a distance of approximately 200 m. Placeholders may have a reflectivity of 60, while sentinel points may have nonzero reflectivity or different tags. Filtering by reflectivity alone or a fixed tag may miss invalid points.
 
 ### IMU
 
-`data_type=0` 的参考包长为 60 字节，每包一条样本。载荷为六个 IEEE 754 小端 float32。
+The reference packet length for `data_type=0` is 60 bytes, with one sample per packet. The payload contains six IEEE 754 little-endian float32 values.
 
-| 字段 | UDP 数据段偏移 | 单位 |
+| Field | UDP Payload Offset | Unit |
 |---|---|---|
 | gyro_x / gyro_y / gyro_z | 36 / 40 / 44 | rad/s |
 | acc_x / acc_y / acc_z | 48 / 52 / 56 | g |
 
-加速度乘以 9.80665 可换成 m/s²。以偏移 28 开始的 32 字节计算标准 CRC32，与偏移 24 处的小端 u32 比较。
+Multiply acceleration by 9.80665 to convert it to m/s². Compute standard CRC32 over the 32 bytes beginning at offset 28, and compare it with the little-endian u32 at offset 24.
 
-## 4 控制报文怎样组织
+## 4 Building Control Frames
 
-### 帧字段
+### Frame Fields
 
-控制命令写作 `命令集/命令号`，例如 `32/12` 对应两个字节 `0x32`、`0x12`。以下偏移相对控制帧首字节。
+Commands are written as `command set/command ID`. For example, `32/12` represents the two bytes `0x32` and `0x12`. The offsets below are relative to the first byte of the control frame.
 
-| 字段 | 偏移 | 字节数 | 编码 |
+| Field | Offset | Bytes | Encoding |
 |---|---|---|---|
 | sof | 0 | 1 | `0x55` |
-| length_lo | 1 | 1 | 整帧长度的低 8 位 |
-| version_length_hi | 2 | 1 | 低 2 位为长度高位，其余 6 位为协议版本 1 |
-| crc8 | 3 | 1 | 校验帧的前三字节 |
-| sender | 4 | 1 | 客户端请求用 `0x28` |
-| receiver | 5 | 1 | 客户端请求用 `0xAD` |
-| seq_num | 6 | 2 | u16 请求序号，应答回显 |
-| flags | 8 | 1 | 请求用 `0x40`，应答 bit7 置 1 |
-| cmd_set | 9 | 1 | 命令集 |
-| cmd_id | 10 | 1 | 命令号 |
-| payload | 11 | n | 命令载荷 |
-| crc16 | 11+n | 2 | 校验 sof 至载荷末尾，小端保存 |
+| length_lo | 1 | 1 | Low 8 bits of the complete frame length |
+| version_length_hi | 2 | 1 | Low 2 bits contain the high length bits. The other 6 bits contain protocol version 1 |
+| crc8 | 3 | 1 | Checksum of the first three frame bytes |
+| sender | 4 | 1 | Use `0x28` in client requests |
+| receiver | 5 | 1 | Use `0xAD` in client requests |
+| seq_num | 6 | 2 | u16 request sequence number, echoed in the response |
+| flags | 8 | 1 | Use `0x40` for requests. Response bit7 is set to 1 |
+| cmd_set | 9 | 1 | Command set |
+| cmd_id | 10 | 1 | Command ID |
+| payload | 11 | n | Command payload |
+| crc16 | 11+n | 2 | Checksum from sof through the payload end, stored little-endian |
 
-总长为 `13 + n`。计算长度用 `byte[1] + ((byte[2] & 0x03) << 8)`，协议版本用 `byte[2] >> 2`。按位宽计算，整帧可编码为 13 至 1023 字节，载荷上限为 1010 字节，各命令还受自身长度和缓冲约束。
+The total length is `13 + n`. Decode the length using `byte[1] + ((byte[2] & 0x03) << 8)` and the protocol version using `byte[2] >> 2`. The field width can encode complete frames from 13 to 1023 bytes, with a maximum payload of 1010 bytes. Individual commands are also constrained by their own length and buffer requirements.
 
-请求应使用独立递增的序号并处理 u16 回绕。接收时先检查来源、帧长和 CRC，再按交换后的端点、序号、命令集、命令号和应答标志匹配。主动推送另行解析。
+Use an incrementing request sequence number and handle u16 wraparound. On reception, check the source, frame length, and CRCs first. Then match the swapped endpoints, sequence number, command set, command ID, and response flag. Parse unsolicited messages separately.
 
 ### CRC
 
-| 校验 | 初值 | 常规多项式 | 右移反射多项式 | 结果异或 | 范围 |
+| Checksum | Initial Value | Normal Polynomial | Reflected Polynomial for Right Shifts | Final XOR | Coverage |
 |---|---|---|---|---|---|
-| 控制 CRC8 | `0x77` | `0x31` | `0x8C` | `0x00` | 控制帧前三字节 |
-| 控制 CRC16 | `0x3692` | `0x1021` | `0x8408` | `0x0000` | 从 sof 到载荷末尾 |
-| IMU CRC32 | `0xFFFFFFFF` | `0x04C11DB7` | `0xEDB88320` | `0xFFFFFFFF` | UDP 偏移 28 至包尾 |
+| Control CRC8 | `0x77` | `0x31` | `0x8C` | `0x00` | First three control frame bytes |
+| Control CRC16 | `0x3692` | `0x1021` | `0x8408` | `0x0000` | From sof through the payload end |
+| IMU CRC32 | `0xFFFFFFFF` | `0x04C11DB7` | `0xEDB88320` | `0xFFFFFFFF` | UDP payload offset 28 through the packet end |
 
-CRC8、CRC16 可用下面的右移算法，分别传入对应初值和反射多项式。
+For CRC8 and CRC16, use the following right-shift algorithm with the corresponding initial value and reflected polynomial.
 
 ```python
 def reflected_crc(data, initial, polynomial):
@@ -214,255 +214,253 @@ def reflected_crc(data, initial, polynomial):
     return value
 ```
 
-IMU CRC32 可直接计算 `zlib.crc32(udp_payload[28:])`。接收程序还应检查报文长度和数据类型。
+For IMU CRC32, use `zlib.crc32(udp_payload[28:])`. Also check the packet length and data type.
 
-### 命令速查
+### Command Reference
 
-| 指令 | 方向 | 用途 |
+| Command | Direction | Purpose |
 |---|---|---|
-| `32/21` | 设备 → 广播 | 发现设备 |
-| `01/02` | 设备 → 客户端 | 状态与配置推送 |
-| `32/12` | 客户端 → 设备 | 单项配置读取 |
-| `32/42` | 客户端 → 设备 | 批量配置读取 |
-| `32/13` | 客户端 → 设备 | 单项配置写入 |
-| `32/43` | 客户端 → 设备 | 批量格式的配置写入 |
-| `32/50` | 客户端 → 设备 | 设置目标工作状态 |
-| `32/51` | 客户端 → 设备 | 读取目标工作状态 |
-| `32/14` | 客户端 → 设备 | 设置采样使能 |
-| `00/0B` | 客户端 → 设备 | 软件重启 |
-| `00/68` | 客户端 → 设备 | 外部授时参考命令 |
-| `00/07` | 客户端 → 设备 | 进入 Loader 升级模式 |
+| `32/21` | Device → Broadcast | Device discovery |
+| `01/02` | Device → Client | Status and configuration push |
+| `32/12` | Client → Device | Read one configuration parameter |
+| `32/42` | Client → Device | Read configuration parameters in a batch |
+| `32/13` | Client → Device | Write one configuration parameter |
+| `32/43` | Client → Device | Write configuration using the batch-format command |
+| `32/50` | Client → Device | Set the target operating state |
+| `32/51` | Client → Device | Read the target operating state |
+| `32/14` | Client → Device | Set sampling enable |
+| `00/0B` | Client → Device | Software reboot |
+| `00/68` | Client → Device | External time synchronization reference command |
+| `00/07` | Client → Device | Enter Loader update mode |
 
-## 5 配置读取和写入
+## 5 Reading and Writing Configuration
 
-本节所有偏移都相对命令载荷起点。UID 为小端 u32，长度必须与第 6、7 节的参数清单一致。
+All offsets in this section are relative to the start of the command payload. UIDs are little-endian u32 values. Lengths must match the parameter tables in Sections 6 and 7.
 
-### 单项读取 `32/12`
+### Read One Parameter with `32/12`
 
-请求长 8 字节。
+The request is 8 bytes long.
 
-| 字段 | 偏移 | 类型 |
+| Field | Offset | Type |
 |---|---|---|
 | uid | 0 | u32 |
 | expected_len | 4 | u32 |
 
-成功应答的结构如下，先检查 ret_code 和实际长度，再取值。
+A successful response uses the following layout. Check ret_code and the actual payload length before reading the value.
 
-| 字段 | 偏移 | 类型 |
+| Field | Offset | Type |
 |---|---|---|
-| ret_code | 0 | u8，成功为 0 |
-| uid | 1 | u32，回显请求 UID |
+| ret_code | 0 | u8, 0 on success |
+| uid | 1 | u32, echoes the requested UID |
 | length | 5 | u16 |
 | reserved | 7 | u16 |
-| value | 9 | length 个字节 |
+| value | 9 | length bytes |
 
-读取点云类型 `0x00010021`、期望长度 1 的完整示例如下。
+The following complete example reads point cloud type `0x00010021` with an expected length of 1.
 
 ```text
 TX  55 15 04 A9 | 28 AD | 10 01 | 40 | 32 12 | 21 00 01 00 01 00 00 00 | 2B D7
 RX  55 17 04 38 | AD 28 | 10 01 | 80 | 32 12 | 00 21 00 01 00 01 00 00 00 01 | 06 5B
 ```
 
-### 批量读取 `32/42`
+### Batch Read with `32/42`
 
-请求为 `count u16`，后接 count 个 `uid u32`。应答头为 7 字节。
+The request contains `count u16`, followed by count `uid u32` values. The response header is 7 bytes long.
 
-| 字段 | 偏移 | 类型 |
+| Field | Offset | Type |
 |---|---|---|
-| ret_code | 0 | u8，成功为 0 |
-| error_key | 1 | u32，成功为 0 |
+| ret_code | 0 | u8, 0 on success |
+| error_key | 1 | u32, 0 on success |
 | item_count | 5 | u16 |
-| item_list | 7 | 每项 `uid u32, length u16, value[length]` |
+| item_list | 7 | Each item contains `uid u32, length u16, value[length]` |
 
-按每项自己的 UID 和 length 解析，较长列表可拆成小批次。配置批量查询使用 `32/42`。
+Parse each item using its own UID and length. Split long lists into smaller batches. Use `32/42` for batch configuration queries.
 
-### 单项写入 `32/13`
+### Write One Parameter with `32/13`
 
-| 字段 | 偏移 | 类型 |
+| Field | Offset | Type |
 |---|---|---|
 | uid | 0 | u32 |
 | length | 4 | u32 |
-| value | 8 | length 个字节 |
+| value | 8 | length bytes |
 
-成功 ACK 的载荷为 `00`。只对清单中标为读写的项目执行写入。写完回读，并在接收端核对实际输出。
+The successful ACK payload is `00`. Write only parameters marked read/write in the tables. Read them back afterward and check the actual output at the receiving endpoint.
 
-### 批量格式写入 `32/43`
+### Batch-Format Write with `32/43`
 
-下面保留单项请求格式。多个参数可用 `32/13` 逐条设置和回读。
+The single-item request format is shown below. For multiple parameters, use `32/13` to set and read back each parameter individually.
 
-| 字段 | 偏移 | 类型与取值 |
+| Field | Offset | Type and Value |
 |---|---|---|
-| reserved | 0 | u16，填 0 |
-| item_count | 2 | u16，单项填 1 |
+| reserved | 0 | u16, set to 0 |
+| item_count | 2 | u16, set to 1 for a single item |
 | uid | 4 | u32 |
 | length | 8 | u16 |
-| value | 10 | length 个字节 |
+| value | 10 | length bytes |
 
-应答载荷为 `ret_code u8, error_key u32`，成功为五个零字节。返回码参考 `0x03` 写入失败、`0x07` 格式错误。报错和超时之后仍需逐项回读，部分写入可能已经执行。
+The response payload contains `ret_code u8, error_key u32`. Five zero bytes indicate success. Reference return codes include `0x03` for a write failure and `0x07` for a format error. Read parameters back after an error or timeout, because some writes may already have taken effect.
 
-以下示例将窗口 0 航向终点设为 180°。应用前先保存角度原值并关闭 ROI。
+The following example sets the yaw end angle of window 0 to 180°. Save the original angles and disable ROI before applying it.
 
 ```text
 TX  55 1B 04 75 | 28 AD | 12 01 | 40 | 32 43 | 00 00 01 00 25 00 01 00 04 00 B4 00 00 00 | 39 60
 RX  55 12 04 C7 | AD 28 | 12 01 | 80 | 32 43 | 00 00 00 00 00 | FC 99
 ```
 
-## 6 网络目的地址与运行参数
+## 6 Network Destinations and Runtime Parameters
 
-### 推送地址
+### Streaming Destinations
 
-| UID | 名称 | 长度 | 属性 | 含义 |
+| UID | Name | Length | Access | Meaning |
 |---|---|---|---|---|
-| `0x00010019` | host_msg_ip | 4 B | 读写 | 状态推送目的 IPv4 |
-| `0x0001001A` | host_msg_port | 2 B | 读写 | 状态推送目的端口 |
-| `0x0001001B` | host_pcl_ip | 4 B | 读写 | 点云目的 IPv4 |
-| `0x0001001C` | host_pcl_port | 2 B | 读写 | 点云目的端口 |
-| `0x0001001D` | host_imu_ip | 4 B | 读写 | IMU 目的 IPv4 |
-| `0x0001001E` | host_imu_port | 2 B | 读写 | IMU 目的端口 |
+| `0x00010019` | host_msg_ip | 4 B | Read/write | Status push destination IPv4 |
+| `0x0001001A` | host_msg_port | 2 B | Read/write | Status push destination port |
+| `0x0001001B` | host_pcl_ip | 4 B | Read/write | Point cloud destination IPv4 |
+| `0x0001001C` | host_pcl_port | 2 B | Read/write | Point cloud destination port |
+| `0x0001001D` | host_imu_ip | 4 B | Read/write | IMU destination IPv4 |
+| `0x0001001E` | host_imu_port | 2 B | Read/write | IMU destination port |
 
-IPv4 UID 将点分地址表示为一个 u32，再按小端写入。例如文档地址 `192.0.2.50` 对应 `32 02 00 C0`。端口 60099 对应小端字节 `C3 EA`。状态推送 TLV 中的 IPv4 则按点分顺序存放，同一地址是 `C0 00 02 32`。
+An IPv4 UID represents the dotted-decimal address as a u32 and stores it little-endian. For example, the documentation address `192.0.2.50` is encoded as `32 02 00 C0`. Port 60099 is encoded as the little-endian bytes `C3 EA`. IPv4 addresses in status push TLVs use dotted-decimal byte order, so the same address appears as `C0 00 02 32`.
 
-设置一组新地址时，先保存 IP 和端口原值，准备绑定新地址的接收 socket，再逐条写入并回读。IP 和端口之间的中间状态可能造成暂时收不到包。
+Before setting a new destination, save the existing IP and port, then prepare a receiving socket bound to the new address. Write and read back each value individually. The intermediate configuration between the IP and port writes may temporarily interrupt reception.
 
-### 运行参数
+### Runtime Parameters
 
-| UID | 名称 | 长度 | 属性 | 含义 |
+| UID | Name | Length | Access | Meaning |
 |---|---|---|---|---|
-| `0x00010001` | dev_idx | 1 B | 只读 | 设备序号 |
-| `0x00010002` | ip_mode | 1 B | 只读 | IP 获取方式 |
-| `0x00010014` | imu_en | 1 B | 只读 | 0 关闭、1 开启 |
-| `0x00010015` | coord_type | 1 B | 只读 | 坐标系类型 |
-| `0x0001001F` | sample_mode | 1 B | 只读 | 采样模式配置 |
-| `0x00010020` | pattern_mode | 1 B | 只读 | 扫描模式，0 为非重复扫描 |
-| `0x00010021` | pcl_data_type | 1 B | 只读 | 1 为 32 位直角坐标点云 |
-| `0x00010022` | tgt_state | 1 B | 只读 | 目标状态配置项 |
+| `0x00010001` | dev_idx | 1 B | Read-only | Device index |
+| `0x00010002` | ip_mode | 1 B | Read-only | IP address acquisition mode |
+| `0x00010014` | imu_en | 1 B | Read-only | 0 disabled, 1 enabled |
+| `0x00010015` | coord_type | 1 B | Read-only | Coordinate system type |
+| `0x0001001F` | sample_mode | 1 B | Read-only | Sampling mode configuration |
+| `0x00010020` | pattern_mode | 1 B | Read-only | Scan pattern, 0 for non-repetitive scanning |
+| `0x00010021` | pcl_data_type | 1 B | Read-only | 1 for 32-bit Cartesian point cloud |
+| `0x00010022` | tgt_state | 1 B | Read-only | Target state configuration parameter |
 
-控制流程中的目标状态通过 `32/51 key=3` 读取，实际状态看推送键 `0x8006`。配置项 `tgt_state` 可能与运行时状态不同。
+Read the runtime target state using `32/51 key=3`, and check status push key `0x8006` for the actual state. The configuration parameter `tgt_state` may differ from the runtime state.
 
-## 7 扫描窗口和角度设置
+## 7 Scan Windows and Angle Settings
 
-ROI 由两组窗口及一字节使能位组成。角度字段使用小端 int32，单位为度。航向按设备坐标系定义，+X 为 0°、+Y 为 90°。
+ROI consists of two windows and a one-byte enable bitmask. Angle fields are little-endian int32 values in degrees. Yaw follows the device coordinate system, with +X at 0° and +Y at 90°.
 
-### 参数表
+### Parameters
 
-| UID | 名称 | 长度 | 属性 | 含义 |
+| UID | Name | Length | Access | Meaning |
 |---|---|---|---|---|
-| `0x00010023` | roi_en | 1 B | 读写 | bit0 启用窗口 0，bit1 启用窗口 1 |
-| `0x00010024` | roi_cfg0.yaw_start | 4 B | 读写 | 窗口 0 航向起点 |
-| `0x00010025` | roi_cfg0.yaw_stop | 4 B | 读写 | 窗口 0 航向终点 |
-| `0x00010026` | roi_cfg0.pitch_start | 4 B | 读写 | 窗口 0 俯仰起点 |
-| `0x00010027` | roi_cfg0.pitch_stop | 4 B | 读写 | 窗口 0 俯仰终点 |
-| `0x00010028` | roi_cfg0.rsvd | 4 B | 保留 | 回读留档，保持原值 |
-| `0x00010029` | roi_cfg1.yaw_start | 4 B | 读写 | 窗口 1 航向起点 |
-| `0x0001002A` | roi_cfg1.yaw_stop | 4 B | 读写 | 窗口 1 航向终点 |
-| `0x0001002B` | roi_cfg1.pitch_start | 4 B | 读写 | 窗口 1 俯仰起点 |
-| `0x0001002C` | roi_cfg1.pitch_stop | 4 B | 读写 | 窗口 1 俯仰终点 |
-| `0x0001002D` | roi_cfg1.rsvd | 4 B | 保留 | 回读留档，保持原值 |
+| `0x00010023` | roi_en | 1 B | Read/write | bit0 enables window 0, bit1 enables window 1 |
+| `0x00010024` | roi_cfg0.yaw_start | 4 B | Read/write | Window 0 yaw start |
+| `0x00010025` | roi_cfg0.yaw_stop | 4 B | Read/write | Window 0 yaw end |
+| `0x00010026` | roi_cfg0.pitch_start | 4 B | Read/write | Window 0 pitch start |
+| `0x00010027` | roi_cfg0.pitch_stop | 4 B | Read/write | Window 0 pitch end |
+| `0x00010028` | roi_cfg0.rsvd | 4 B | Reserved | Save the readback and retain the original value |
+| `0x00010029` | roi_cfg1.yaw_start | 4 B | Read/write | Window 1 yaw start |
+| `0x0001002A` | roi_cfg1.yaw_stop | 4 B | Read/write | Window 1 yaw end |
+| `0x0001002B` | roi_cfg1.pitch_start | 4 B | Read/write | Window 1 pitch start |
+| `0x0001002C` | roi_cfg1.pitch_stop | 4 B | Read/write | Window 1 pitch end |
+| `0x0001002D` | roi_cfg1.rsvd | 4 B | Reserved | Save the readback and retain the original value |
 
-单窗口示例采用 `0 ≤ yaw_start < yaw_stop ≤ 360`。俯仰起点小于终点，下表沿用 −7° 至 52° 的示例值，实际设备应先读回当前配置。
+The single-window example uses `0 ≤ yaw_start < yaw_stop ≤ 360`. The pitch start angle is less than the end angle. The table uses an example pitch range of −7° to 52°. Read the current settings from the device before making changes.
 
-| 设置 | 窗口 0 航向 | 窗口 1 航向 | 俯仰 | roi_en |
+| Setting | Window 0 Yaw | Window 1 Yaw | Pitch | roi_en |
 |---|---|---|---|---|
-| 关闭软件裁剪 | 保留原值 | 保留原值 | 保留原值 | `0x00` |
-| 水平 0°–180° | 0° 至 180° | 关闭 | 窗口 0 为 −7° 至 52° | `0x01` |
-| 跨零 220°→170° | 220° 至 360° | 0° 至 170° | 两窗口均为 −7° 至 52° | `0x03` |
+| Disable software cropping | Retain original values | Retain original values | Retain original values | `0x00` |
+| Horizontal range 0°–180° | 0° to 180° | Disabled | Window 0 from −7° to 52° | `0x01` |
+| Across zero, 220°→170° | 220° to 360° | 0° to 170° | Both windows from −7° to 52° | `0x03` |
 
-### 修改顺序
+### Configuration Sequence
 
-1. 读回并保存 ROI 表中 11 项原值。
-2. 通过 `32/13` 将 `roi_en` 写为 0，暂时关闭软件窗口。
-3. 写入所需窗口的航向和俯仰，逐项回读。
-4. 最后写入使能位，`1` 启用窗口 0，`2` 启用窗口 1，`3` 同时启用两者。
-5. 过滤占位点和无回波哨兵，检查窗口内外的有效点云，边界附近留出角度容差。
+1. Read and save the original values of all 11 ROI parameters.
+2. Use `32/13` to set `roi_en` to 0 and temporarily disable the software windows.
+3. Write the yaw and pitch angles for the required windows, reading back each value.
+4. Write the enable bitmask last. Use `1` for window 0, `2` for window 1, or `3` for both.
+5. Filter placeholders and no-return sentinel points. Check valid returns inside and outside the windows, allowing angular tolerance near the boundaries.
 
-例如设置窗口 0 水平 0°–180°，俯仰沿用原值，操作为依次写 `0x00010023=0`、`0x00010024=0`、`0x00010025=180`、`0x00010023=1`。使能位长 1 字节，角度长 4 字节。
+For example, to set window 0 to a horizontal range of 0°–180° while retaining its pitch settings, write `0x00010023=0`, `0x00010024=0`, `0x00010025=180`, and `0x00010023=1` in that order. The enable bitmask is 1 byte, and each angle is 4 bytes.
 
-读取 ROI 使能、长度为 1 的完整示例如下。
+The following complete example reads ROI enable with an expected length of 1.
 
 ```text
 TX  55 15 04 A9 | 28 AD | 11 01 | 40 | 32 12 | 23 00 01 00 01 00 00 00 | E9 D9
 RX  55 17 04 38 | AD 28 | 11 01 | 80 | 32 12 | 00 23 00 01 00 01 00 00 00 00 | 5F 99
 ```
 
-`roi_en=0` 关闭软件窗口限制，设备的实际覆盖还受启动配置、安装遮挡和场景影响。尝试撤销修改时，先关闭窗口，按备份写回角度，再写回原有使能位，分别核对回读和实际点云。
+Setting `roi_en=0` disables the software window restriction. Actual coverage also depends on the startup configuration, installation obstructions, and scene. To attempt a rollback, disable the windows, write back the saved angles, then restore the original enable bitmask. Check both readback and the actual point cloud.
 
-## 8 发现报文与状态推送
+## 8 Discovery and Status Messages
 
-### 发现 `32/21`
+### Discovery `32/21`
 
-广播的参考端点为 `sender=0xAD, receiver=0x0A`，flags 为 `0x20`。载荷共 19 字节。
+Reference broadcast endpoints are `sender=0xAD, receiver=0x0A`, with flags set to `0x20`. The payload is 19 bytes long.
 
-| 字段 | 载荷偏移 | 类型 |
+| Field | Payload Offset | Type |
 |---|---|---|
-| sn | 0 | uint8[14]，设备序列号 |
+| sn | 0 | uint8[14], device serial number |
 | reserved | 14 | uint8[2] |
-| flag | 16 | uint8，参考值 `0x1A` |
-| tail | 17 | uint16，保留，可变化 |
+| flag | 16 | uint8, reference value `0x1A` |
+| tail | 17 | uint16, reserved and may vary |
 
-### 状态推送 `01/02`
+### Status Push `01/02`
 
-推送载荷先放 `count u16` 和两字节保留，从偏移 4 起依次放置 `key u16, length u16, value[length]`。接收端按长度推进，遇到未知 key 时跳过该项。参考帧标志为 `0x00`。
+The payload begins with `count u16` and two reserved bytes. Starting at offset 4, items are arranged as `key u16, length u16, value[length]`. Advance through the payload using each item's length, and skip unknown keys. The reference frame flags are `0x00`.
 
-| key | 长度 | 类型与含义 |
+| key | Length | Type and Meaning |
 |---|---|---|
-| `0x0000` | 1 B | 点云类型，1 为直角坐标 |
-| `0x0001` | 1 B | 扫描模式，0 为非重复扫描 |
-| `0x0004` | 12 B | IP、掩码、网关，各四字节，按点分顺序 |
-| `0x0005` | 8 B | 状态推送配置目的地址 |
-| `0x0006` | 8 B | 点云配置目的地址 |
-| `0x0007` | 8 B | IMU 配置目的地址 |
-| `0x0015` | 20 B | 窗口 0，四个 int32 角度及四字节保留 |
-| `0x0016` | 20 B | 窗口 1，同上 |
-| `0x0017` | 1 B | ROI 使能位 |
-| `0x001A` | 1 B | 目标状态配置项 |
-| `0x001C` | 1 B | IMU 使能 |
-| `0x8000` | 16 B | 序列号 |
-| `0x8001` | 64 B | 产品信息字符串 |
-| `0x8002` | 4 B | 应用固件版本字节 |
-| `0x8003` | 4 B | 引导固件版本字节 |
-| `0x8004` | 4 B | 硬件版本字节 |
-| `0x8005` | 6 B | MAC 地址 |
-| `0x8006` | 1 B | 实际工作状态 |
-| `0x8007` | 4 B | int32 温度，单位 0.01 ℃ |
-| `0x8008` | 4 B | uint32 上电次数 |
-| `0x8009` | 8 B | uint64 本地时间，ns |
-| `0x800A` | 8 B | uint64 上次同步时间，ns |
-| `0x800B` | 8 B | int64 时间偏移，ns |
-| `0x800C` | 1 B | 时间同步类型 |
-| `0x800E` | 2 B | 模块异常等级 |
-| `0x8010` | 1 B | 固件类型 |
-| `0x8011` | 32 B | 八个小端 uint32 诊断码，非零项结合诊断资料判断 |
+| `0x0000` | 1 B | Point cloud type, 1 for Cartesian |
+| `0x0001` | 1 B | Scan pattern, 0 for non-repetitive scanning |
+| `0x0004` | 12 B | IP address, subnet mask, and gateway, four bytes each in dotted-decimal byte order |
+| `0x0005` | 8 B | Configured status push destination |
+| `0x0006` | 8 B | Configured point cloud destination |
+| `0x0007` | 8 B | Configured IMU destination |
+| `0x0015` | 20 B | Window 0, four int32 angles and four reserved bytes |
+| `0x0016` | 20 B | Window 1, same layout |
+| `0x0017` | 1 B | ROI enable bitmask |
+| `0x001A` | 1 B | Target state configuration parameter |
+| `0x001C` | 1 B | IMU enable |
+| `0x8000` | 16 B | Serial number |
+| `0x8001` | 64 B | Product information string |
+| `0x8002` | 4 B | Application firmware version bytes |
+| `0x8003` | 4 B | Loader firmware version bytes |
+| `0x8004` | 4 B | Hardware version bytes |
+| `0x8005` | 6 B | MAC address |
+| `0x8006` | 1 B | Actual operating state |
+| `0x8007` | 4 B | int32 temperature in units of 0.01 ℃ |
+| `0x8008` | 4 B | uint32 power-up count |
+| `0x8009` | 8 B | uint64 local time in ns |
+| `0x800A` | 8 B | uint64 last synchronization time in ns |
+| `0x800B` | 8 B | int64 time offset in ns |
+| `0x800C` | 1 B | Time synchronization type |
+| `0x800E` | 2 B | Module fault severity |
+| `0x8010` | 1 B | Firmware type |
+| `0x8011` | 32 B | Eight little-endian uint32 diagnostic codes. Interpret nonzero entries using the diagnostic documentation |
 
-三个 8 字节目的地址项均按四字节 IPv4、两字节小端端口、两字节保留排列。状态推送的 key 与配置 UID 使用不同的编号体系，配置类 TLV 也可能保留旧值。外发日志时，按授权范围脱敏设备身份和网络地址。
+Each of the three 8-byte destination entries contains a four-byte IPv4 address, a two-byte little-endian port, and two reserved bytes. Status push keys and configuration UIDs use separate numbering systems. Configuration TLVs may also contain stale values. Redact device identity and network addresses according to the authorized disclosure scope before sharing logs.
 
-以下推送帧只含一项 `0x8006=2`。
+The following push frame contains a single item, `0x8006=2`.
 
 ```text
 RX  55 16 04 FC | AD 4D | 04 01 | 00 | 01 02 | 01 00 00 00 06 80 01 00 02 | 53 F3
 ```
 
-## 9 软件重启与授时
+## 9 Software Reboot and Time Synchronization
 
-`00/0B` 请求为空，成功应答载荷为 `00`。发送后分别观察控制、状态推送和数据流恢复情况。
+The `00/0B` request has an empty payload, and its successful response payload is `00`. After sending it, monitor the control interface, status messages, and data streams separately as they resume.
 
 ```text
 TX  55 0D 04 33 | 28 AD | 03 01 | 40 | 00 0B | 42 75
 RX  55 0E 04 66 | AD 28 | 03 01 | 80 | 00 0B | 00 | DB E5
 ```
 
-重启后重新核对网络目的地址、ROI 和状态。参数读回值与实际运行效果可能不同，重新写入时也要核对输出。物理断电后的参数保持性取决于具体设备。
+After a reboot, recheck the network destinations, ROI, and state. Configuration readback may differ from actual runtime behavior. Check the output again when reapplying settings. Whether parameters persist across a power cycle depends on the device.
 
-`00/68` 的参考载荷为 `channel u8, timestamp u64`，时间戳单位为 µs。外部授时还涉及通道、时间原点和脉冲条件，具体取值需结合设备配置，授时效果应根据时间戳和同步状态判断。
+The reference payload for `00/68` is `channel u8, timestamp u64`, with the timestamp in µs. External time synchronization also depends on the channel, time origin, and pulse conditions. Select values according to the device configuration, and assess synchronization using timestamps and synchronization status.
 
-## 10 固件写入口
+## 10 Firmware Write Entry
 
-进入写入模式使用 `00/07`，即命令集 `0x00`、命令号 `0x07`。向设备 UDP `60000` 发送空载荷请求，收到应答载荷 `00 00 00` 表示请求已接受。
+Use `00/07` to enter write mode, with command set `0x00` and command ID `0x07`. Send an empty-payload request to device UDP port `60000`. A response payload of `00 00 00` indicates that the request has been accepted.
 
-序号为 `0x4810` 时的完整请求和应答如下。
+The complete request and response below use sequence number `0x4810`.
 
 ```text
 TX  55 0D 04 33 | 28 AD | 10 48 | 40 | 00 07 | 76 F9
 RX  55 10 04 56 | AD 28 | 10 48 | 80 | 00 07 | 00 00 00 | 0A 32
 ```
-
-
