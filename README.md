@@ -1,6 +1,6 @@
 # Unlocking Point Cloud Restrictions on the T100 LiDAR
 
-[简体中文](README.zh-CN.md)
+[T100激光雷达中文协议 / 简体中文](README.zh-CN.md)
 
 This document covers Ethernet access, sampling control, point cloud and IMU decoding, configuration access, and scan angle settings. It also lists the command for entering firmware update mode. The control interface uses a `0x55` frame header and UDP port `60000` on the device. Behavior depends on the firmware and runtime configuration. During integration, check command responses, configuration readback, and the actual data streams together.
 
