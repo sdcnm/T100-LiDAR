@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T100 LiDAR Toolkit · Local Preview</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="T100 LiDAR Toolkit"><span class="brand-mark">◎</span><strong>T100 <span>LiDAR Toolkit</span></strong><small>0.1.1 PREVIEW</small></a>
+    <div class="header-right"><span class="connection" id="connection"><i></i><span data-i18n="connected">本地 UDP 已连接</span></span><button class="language" id="language" type="button">EN / 中文</button></div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><p class="eyebrow">ETHERNET / UDP · PROTOCOL WORKSPACE</p><h1 data-i18n="title">T100 点云与协议工具</h1><p class="subtitle" data-i18n="subtitle">查看点云、调整扫描窗口，追踪每一条控制报文。</p></div>
+      <div class="demo-note"><span class="demo-dot"></span><div><strong data-i18n="demo">模拟数据 · 本地演示</strong><small data-i18n="demoNote">通过本地 UDP 收发，不连接实体雷达</small></div></div>
+    </section>
+    <section class="metrics" aria-label="stream statistics">
+      <div class="metric"><span data-i18n="rate">有效点速率</span><div><strong id="rate">—</strong><small>pts/s</small></div><p data-i18n="rateNote">最近 1 秒收到的有效点</p></div>
+      <div class="metric"><span data-i18n="packets">点云数据包</span><div><strong id="packets">—</strong><small data-i18n="packetsUnit">包</small></div><p><span class="tiny-dot"></span><span id="fresh" data-i18n="waiting">等待数据</span></p></div>
+      <div class="metric"><span data-i18n="state">目标 / 实际状态</span><div class="state-value"><strong id="target">—</strong><b>/</b><strong id="actual">—</strong></div><p data-i18n="stateNote">控制查询 / 0x8006 状态推送</p></div>
+      <div class="metric"><span data-i18n="integrity">数据完整性</span><div><strong id="bad">0</strong><small data-i18n="badUnit">异常包</small></div><p><span id="missing">0</span> <span data-i18n="missing">个点云序号缺口</span></p></div>
+    </section>
+    <section class="workspace">
+      <aside class="control-panel panel">
+        <div class="panel-label"><span data-i18n="control">设备控制</span><span class="pill">SIM</span></div>
+        <div class="device-card"><span class="device-icon">◉</span><div><strong>T100 / LOCAL</strong><small id="endpoint">127.0.0.1</small></div></div>
+        <h3 data-i18n="sampling">采样</h3>
+        <div class="button-pair"><button class="button primary" id="start" type="button"><span>▶</span> <span data-i18n="start">启动</span></button><button class="button" id="stop" type="button"><span>■</span> <span data-i18n="stop">停止</span></button></div>
+        <div class="divider"></div>
+        <div class="section-head"><h3 data-i18n="window">水平扫描窗口</h3><span>ROI 0</span></div>
+        <div class="angle-fields"><label><span data-i18n="from">起点</span><div><input id="yaw-start" type="number" min="0" max="359" value="0" aria-label="Yaw start">°</div></label><span class="arrow">→</span><label><span data-i18n="to">终点</span><div><input id="yaw-end" type="number" min="1" max="360" value="180" aria-label="Yaw end">°</div></label></div>
+        <div class="presets"><button type="button" data-angle="90">90°</button><button type="button" data-angle="180" class="selected">180°</button><button type="button" data-angle="270">270°</button></div>
+        <button class="button primary wide" id="apply" type="button" data-i18n="apply">应用窗口</button>
+        <button class="text-button wide" id="full" type="button" data-i18n="full">关闭裁剪 · 显示 360°</button>
+        <p class="field-note" id="roi-readback">ROI disabled · 360°</p>
+        <div class="divider"></div>
+        <h3 data-i18n="tools">协议工具</h3>
+        <button class="button subtle wide" id="read" type="button"><span>↻</span> <span data-i18n="read">读取参数</span></button>
+        <button class="button subtle wide" id="upgrade" type="button"><span>↑</span> <span data-i18n="upgrade">进入固件写入模式</span></button>
+        <p class="field-note" data-i18n="upgradeNote">仅发送进入指令。</p>
+      </aside>
+      <section class="viewer panel">
+        <div class="viewer-top"><div><span class="viewer-dot"></span><strong data-i18n="cloud">实时点云</strong><small id="visible">0 POINTS</small></div><div class="view-switch"><button id="perspective" class="active" type="button">3D</button><button id="top" type="button" data-i18n="top">俯视</button><button id="reset-view" type="button" title="Reset view">↺</button></div></div>
+        <div class="canvas-wrap"><canvas id="cloud" aria-label="Simulated T100 point cloud viewer"></canvas><div class="canvas-overlay"><span>SYNTHETIC ROOM</span><p data-i18n="scene">房间墙面 / 地面 / 立柱</p></div><div class="canvas-legend"><i></i><span data-i18n="height">按高度着色</span><span>−0.7 m</span><span class="gradient"></span><span>4.2 m</span></div><div class="canvas-help" data-i18n="drag">拖动旋转 · 滚轮缩放</div><div class="paused-overlay" id="paused" hidden><span>Ⅱ</span><strong data-i18n="paused">采样已停止</strong><small data-i18n="pausedNote">点击启动，恢复模拟数据流</small></div></div>
+        <div class="viewer-footer"><span><b id="roi-badge">360°</b> <span data-i18n="coverage">模拟水平窗口</span></span><span>XYZ · m <span class="footer-separator">|</span> <span data-i18n="retention">保留最近 2 秒</span></span></div>
+      </section>
+      <aside class="inspector panel">
+        <div class="panel-label"><span data-i18n="inspector">数据检查</span><span class="pill neutral">LIVE</span></div>
+        <h3>IMU</h3><p class="inspector-note" data-i18n="imuNote">UDP 解码 · CRC32 校验</p>
+        <div class="imu-values"><div><span>GX</span><strong id="gx">—</strong><small>rad/s</small></div><div><span>GY</span><strong id="gy">—</strong><small>rad/s</small></div><div><span>GZ</span><strong id="gz">—</strong><small>rad/s</small></div><div><span>AZ</span><strong id="az">—</strong><small>g</small></div></div>
+        <div class="crc-state" id="crc">✓ CRC32 <span data-i18n="valid">通过</span></div>
+        <div class="divider"></div><h3 data-i18n="wire">数据格式</h3><dl class="format-list"><div><dt data-i18n="packetSize">点云包长</dt><dd>1380 B</dd></div><div><dt data-i18n="perPacket">每包记录</dt><dd>96 × 14 B</dd></div><div><dt data-i18n="coordinates">坐标</dt><dd>int32 → m</dd></div><div><dt data-i18n="controlFrame">控制帧</dt><dd>0x55 / CRC16</dd></div></dl>
+        <div class="divider"></div><h3 data-i18n="export">导出数据</h3><a class="download" href="/export/points.csv"><span>CSV</span><div><strong data-i18n="exportPoints">当前模拟点云</strong><small>XYZ / reflectivity / tag</small></div><b>↗</b></a><a class="download" href="/export/session.json"><span>JSON</span><div><strong data-i18n="exportSession">模拟会话快照</strong><small data-i18n="exportDetail">状态、参数与报文</small></div><b>↗</b></a>
+      </aside>
+    </section>
+    <section class="events-panel panel"><div class="events-heading"><div><h2 data-i18n="events">控制报文</h2><p data-i18n="eventsNote">下面的收发来自本地 UDP 模拟设备。所有示例数据均为合成数据。</p></div><span>TX / RX · HEX</span></div><div class="events-scroll"><table><thead><tr><th data-i18n="time">时间</th><th data-i18n="direction">方向</th><th data-i18n="command">指令</th><th>SEQ</th><th data-i18n="frame">完整报文</th></tr></thead><tbody id="events"></tbody></table></div></section>
+    <footer><span>T100 LiDAR Toolkit · independent protocol implementation</span><span data-i18n="scope">本地预览</span></footer>
+  </main>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <dialog id="upgrade-dialog">
+    <div class="dialog-header"><div><p class="eyebrow">FIRMWARE WRITE MODE</p><h2 data-i18n="upgradeTitle">进入固件写入模式</h2></div><button id="close-dialog" type="button" aria-label="Close">×</button></div>
+    <p class="write-mode-message" data-i18n="writeModeReady">模拟设备已进入固件写入模式</p>
+    <p data-i18n="entryCommand">入口指令：00/07</p>
+    <pre>55 0D 04 33 28 AD 10 48 40 00 07 76 F9</pre>
+    <p data-i18n="modeNote">本地模拟设备 · 采样已暂停</p>
+    <div class="entry-actions"><button class="button" id="resume-demo" type="button" data-i18n="resumeDemo">恢复模拟采样</button></div>
+  </dialog>
+  <script src="/app.js"></script>
+</body>
+</html>
