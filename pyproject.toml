@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "t100-lidar-toolkit"
+version = "0.2.0"
+description = "T100 LiDAR Ethernet protocol tools, local simulator and point cloud preview"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["t100", "lidar", "point-cloud", "udp", "protocol"]
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
+
+[project.scripts]
+t100 = "t100_lidar.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+t100_lidar = ["static/*"]
