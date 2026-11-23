@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "t100-lidar-toolkit"
 version = "0.2.0"
-description = "T100 LiDAR Ethernet protocol tools, local simulator and point cloud preview"
+description = "Unofficial T100 LiDAR Python UDP driver, point cloud and protocol tools"
+license = {file = "LICENSE"}
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
-keywords = ["t100", "lidar", "point-cloud", "udp", "protocol"]
+keywords = ["t100", "t100-lidar", "lidar-driver", "lidar-protocol", "dji", "agras", "point-cloud", "imu", "ethernet", "udp", "python", "firmware-write-mode"]
 classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
 
 [project.scripts]

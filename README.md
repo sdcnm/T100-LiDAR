@@ -1,10 +1,30 @@
-# T100 LiDAR Toolkit — Ethernet / UDP protocol tools
+# T100 LiDAR Driver & Protocol Tools — Ethernet / UDP
 
 [简体中文](README.zh-CN.md) · [Protocol reference](docs/protocol.en.md)
 
-A new Python implementation of the published T100 LiDAR protocol: control frames, point cloud and IMU decoding, parameter access, sampling control, ROI settings, and the firmware write mode entry command. Includes a local UDP simulator and a browser preview.
+T100 LiDAR Python protocol driver and Ethernet/UDP tools for point cloud acquisition, IMU decoding, parameter access, sampling control, scan angle settings, and the firmware write mode entry command. Includes a local UDP simulator and a browser preview. This is an independent, unofficial implementation.
+
+T100激光雷达驱动与通信协议：网口接入、点云获取、IMU解析、扫描角度设置、固件写入模式入口。
 
 The simulator produces synthetic points; it does not demonstrate physical device performance.
+
+## Common questions
+
+### T100激光雷达驱动 / T100 LiDAR driver
+
+The Python driver receives UDP point cloud and IMU data and sends protocol control requests. See the [command-line examples](#command-line-examples). It is a protocol client, rather than an operating-system driver or a ROS/ROS2 package.
+
+### T100激光雷达刷固件 / Firmware write mode entry
+
+This project provides only the `00/07` request to enter firmware write mode. See the [entry command](docs/protocol.en.md#10-enter-firmware-write-mode).
+
+### 大疆激光雷达协议 / DJI LiDAR protocol
+
+This repository documents T100 Ethernet/UDP frames and provides an independent implementation. It is not an official DJI SDK and does not claim compatibility with every DJI LiDAR model.
+
+### T100 point cloud acquisition and scan angles
+
+Use `capture` for UDP reception and `roi` to read or change the scan window. See the [Chinese guide](README.zh-CN.md) and [protocol reference](docs/protocol.en.md).
 
 ## Quick start
 
@@ -84,3 +104,9 @@ cc -std=c99 -Wall -Wextra -Werror -Iextras tests/test_header.c -o /tmp/t100-head
 Wire examples in the public protocol are used as fixed compatibility fixtures. Other tests cover malformed packets, CRC failures, response matching, real loopback UDP exchanges, ROI/readback, HTTP controls, PCAP output, and the firmware write mode entry.
 
 See [the Chinese quick start](README.zh-CN.md), [the published protocol snapshot](docs/protocol.en.md), [the protocol source record](docs/SOURCE.md).
+
+## License
+
+**Non-commercial use only. Commercial use is prohibited. No commercial authorization is offered.**
+
+The original code and documentation are available under the [T100 Non-Commercial License 1.0](LICENSE). Non-commercial learning, research, modification and redistribution are permitted subject to its terms. Commercial products or services, paid repair work, business operations and commercial research or development are prohibited. Keep the copyright and license notices, and identify changes when redistributing modified copies. This is a source-available project, not an OSI-approved open-source license.
